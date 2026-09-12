@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "awflow"
+version = "0.1.0"
+description = "Aither World Flow — a deterministic agent-workflow runtime: journaled agent calls, prefix-replay resume, barrier-free pipelines and a hard token budget."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "httpx>=0.25.0",
+]
+
+[project.optional-dependencies]
+# OPTIONAL on purpose, and the fallback is a REFUSAL rather than a skip.
+# awflow validates a schema reply locally even when the backend claims to have
+# constrained it, because on the fleet this was measured NOT to be true:
+# `response_format` is forwarded and then discarded, so a caller that trusted it
+# received prose with every signal green. Without jsonschema the runtime falls
+# back to a structural check and RAISES on a non-dict -- it never silently
+# accepts unvalidated content, which would be a fail-open gate.
+schema = ["jsonschema>=4.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/Aitherium/awflow"
+Repository = "https://github.com/Aitherium/awflow.git"
+Issues = "https://github.com/Aitherium/awflow/issues"
+
+[project.scripts]
+awflow = "awflow.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["awflow*"]
