@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1",
+  "name": "awflow",
+  "description": "A deterministic workflow runtime — chain agent calls with journal replay and budget control.",
+  "url": "https://aitherium.github.io/awflow/",
+  "repository": "https://github.com/Aitherium/awflow",
+  "kind": "runtime",
+  "status": "public",
+  "adopt": "Chain parallel and sequential agent calls with deterministic ordering, a persistent journal, and hard budget enforcement. Replay from the journal at any breakpoint.",
+  "pairs_with": [
+    "awdk",
+    "awrun",
+    "awask",
+    "awrelay",
+    "awm",
+    "awgraph"
+  ],
+  "includes": [],
+  "metrics": {
+    "files": {
+      "value": 17,
+      "as_of": "2026-09-11T19:09:45-07:00"
+    },
+    "tests": {
+      "value": 2,
+      "as_of": "2026-09-11T19:09:45-07:00"
+    }
+  }
+}
