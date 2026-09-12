@@ -5,7 +5,7 @@
   "url": "https://aitherium.github.io/awflow/",
   "repository": "https://github.com/Aitherium/awflow",
   "kind": "runtime",
-  "status": "unpublished",
+  "status": "public",
   "adopt": "Chain parallel and sequential agent calls with deterministic ordering, a persistent journal, and hard budget enforcement. Replay from the journal at any breakpoint.",
   "pairs_with": [
     "awdk",
@@ -15,5 +15,15 @@
     "awm",
     "awgraph"
   ],
-  "includes": []
+  "includes": [],
+  "metrics": {
+    "files": {
+      "value": 16,
+      "as_of": "2026-09-11T17:07:39-07:00"
+    },
+    "tests": {
+      "value": 2,
+      "as_of": "2026-09-11T17:07:39-07:00"
+    }
+  }
 }
