@@ -3,8 +3,14 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "awflow"
-version = "0.1.0"
+# Distribution `aitherium-awflow`, import package `awflow`. PyPI `awflow` is a
+# stranger's (Joeri Hermans, 0.1.0, 2022) -- and because OUR version was also
+# 0.1.0 the publish lane's "Already on PyPI?" answered `exists`, skipped every
+# step and reported SUCCESS while publishing nothing (2026-09-12). Owner ruling
+# 2026-09-13: rename the distribution, keep the import name. The bump to 0.2.0
+# makes the exists-check unable to collide again. EIL001 asserts the owner.
+name = "aitherium-awflow"
+version = "0.2.0"
 description = "Aither World Flow — a deterministic agent-workflow runtime: journaled agent calls, prefix-replay resume, barrier-free pipelines and a hard token budget."
 readme = "README.md"
 requires-python = ">=3.10"

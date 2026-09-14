@@ -35,10 +35,10 @@ from typing import Any, Optional
 #: in-fleet behaviour is unchanged); everyone else gets a faithful, smaller
 #: implementation of the same contract.
 try:                                    # fleet: the shared resolver + client
-    from lib.core.AitherHttp import AsyncClient           # noqa: F401
-    from lib.core.AitherPorts import get_service_url      # noqa: F401
+    from lib.core.AitherHttp import AsyncClient  # noqa: F401
+    from lib.core.AitherPorts import get_service_url  # noqa: F401
 except ImportError:                     # pip-installed brick: resolve it here
-    import httpx                        # declared dependency of this package
+    import httpx  # declared dependency of this package
 
     def get_service_url(name: str) -> str:
         """Env-first resolution, the same contract the fleet resolver honours.
@@ -255,7 +255,7 @@ async def dispatch_agent_call(
     if schema:
         try:
             # 🚨 MEASURED 2026-09-05 on the live fleet: `response_format`
-            # (json_schema) is FORWARDED by the router and then DISCARDED
+            # (json_schema) is FORWARDED by MicroScheduler and then DISCARDED
             # by the backend. Two different backends returned HTTP 200 with
             # plain prose for a strict json_schema request -- the silent-no-op
             # class: a caller that asked for an object receives confident text,

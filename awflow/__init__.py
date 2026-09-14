@@ -257,6 +257,7 @@ async def run_workflow(
     journal_path: Optional[Path | str] = None,
     resume_from: Optional[str] = None,
     budget_tokens: int = 1000000,
+    mirror: bool = True,
 ) -> Any:
     """Execute a workflow script with journaling and optional resume.
 
@@ -269,6 +270,8 @@ async def run_workflow(
                      (default: /data/workflows if on fleet, else ~/.awflow)
         resume_from: run_id to resume from (default: None, start fresh)
         budget_tokens: total token budget (default: 1000000)
+        mirror: whether to mirror this run as an expedition (default: True);
+               can be disabled via env AITHER_AWFLOW_MIRROR=0
 
     Returns:
         The return value of the script
@@ -280,6 +283,11 @@ async def run_workflow(
     """
     if not callable(script):
         raise ValueError("script must be callable")
+
+    # Check if mirroring is disabled via env var
+    import os
+    if os.environ.get("AITHER_AWFLOW_MIRROR", "1").lower() in ("0", "false"):
+        mirror = False
 
     # Resolve journal root directory
     if journal_path is None:
@@ -310,6 +318,7 @@ async def run_workflow(
             journal=jnl,
             budget_tokens=budget_tokens,
             run_id=run_id,
+            mirror_enabled=mirror,
         )
     except Exception as e:
         if isinstance(e, runtime.BudgetExhausted):
@@ -333,6 +342,10 @@ async def run_workflow(
         })
         rt.sequence += 1
 
+        # Create mirrored expedition if enabled
+        if mirror:
+            rt.mirror_expedition_id = await rt._create_mirrored_expedition(script)
+
         # Execute the workflow script
         result = await script()
 
@@ -350,9 +363,18 @@ async def run_workflow(
             "total_duration_ms": 0,  # Would need to track actual duration
         })
 
+        # Mirror completion
+        if mirror and rt.mirror_expedition_id:
+            await rt._post_mirror_event("completed", {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "result": str(result)[:2000] if result else "",
+                "status": "completed",
+            })
+
         return result
-    except (BudgetExhausted, JournalError):
+    except (BudgetExhausted, JournalError) as e:
         # Write ERROR record for expected exceptions
+        error_msg = str(e) if e else "BudgetExhausted or JournalError"
         try:
             from datetime import datetime, timezone
             await jnl.write_record({
@@ -361,7 +383,7 @@ async def run_workflow(
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "sequence": rt.sequence,
                 "version": "1",
-                "message": str(e) if 'e' in locals() else "BudgetExhausted or JournalError",
+                "message": error_msg,
             })
         except Exception as exc:
             # NEVER silent. A dropped journal record breaks RESUME -- the one
@@ -373,6 +395,18 @@ async def run_workflow(
                 "[awflow] JOURNAL WRITE FAILED (resume will be incomplete): %s",
                 exc,
             )
+
+        # Mirror failure
+        if mirror and rt.mirror_expedition_id:
+            try:
+                await rt._post_mirror_event("failed", {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "message": error_msg,
+                    "status": "failed",
+                })
+            except Exception as exc:
+                logger.error("[awflow] MIRROR EVENT FAILED: %s", exc)
+
         raise
     except Exception as e:
         logger.exception("Workflow failed")
@@ -397,6 +431,18 @@ async def run_workflow(
                 "[awflow] JOURNAL WRITE FAILED (resume will be incomplete): %s",
                 exc,
             )
+
+        # Mirror failure
+        if mirror and rt.mirror_expedition_id:
+            try:
+                await rt._post_mirror_event("failed", {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "message": str(e),
+                    "status": "failed",
+                })
+            except Exception as exc:
+                logger.error("[awflow] MIRROR EVENT FAILED: %s", exc)
+
         raise
     finally:
         _current_runtime.reset(token)

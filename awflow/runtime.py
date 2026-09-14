@@ -86,6 +86,7 @@ class WorkflowRuntime:
         concurrency_cap: Optional[int] = None,
         run_id: Optional[str] = None,
         dispatcher: Optional[Any] = None,
+        mirror_enabled: bool = True,
     ):
         # An INJECTED dispatcher is the only way to get a fake one. The default
         # is the real MicroScheduler call in dispatch.py; a test that wants a
@@ -103,6 +104,8 @@ class WorkflowRuntime:
         self._replay_prefix: dict[str, Any] = {}  # hash -> result (in-run dedup cache)
         self._replayed_count = 0
         self._live_count = 0
+        self.mirror_enabled = mirror_enabled
+        self.mirror_expedition_id: Optional[str] = None
 
     async def agent(
         self,
@@ -171,6 +174,14 @@ class WorkflowRuntime:
 
         # Live call: dispatch to MicroScheduler
         self._live_count += 1
+
+        # Mirror: post agent_started event
+        await self._post_mirror_event("agent_started", {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "label": label or prompt[:100],
+            "phase": phase,
+            "agent_id": "awflow",
+        })
 
         response = None
         response_json = None
@@ -262,6 +273,22 @@ class WorkflowRuntime:
             f"attempt={attempt}"
         )
         self.sequence += 1
+
+        # Mirror: post agent_result or agent_failed
+        if response is not None:
+            await self._post_mirror_event("agent_result", {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "label": label,
+                "result": str(response)[:16000] if response else "",
+                "tokens": prompt_tokens,
+                "tool_uses": 0,
+            })
+        else:
+            await self._post_mirror_event("agent_failed", {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "label": label,
+                "message": validation_error or "agent call failed after 3 retries",
+            })
 
         # Cache for in-run deduplication
         if response is not None:
@@ -466,6 +493,12 @@ class WorkflowRuntime:
             "title": title,
         })
 
+        # Mirror: post phase event
+        await self._post_mirror_event("phase", {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "phase": title,
+        })
+
         self.sequence += 1
 
     async def log(self, msg: str) -> None:
@@ -485,6 +518,62 @@ class WorkflowRuntime:
         })
 
         self.sequence += 1
+
+    async def _create_mirrored_expedition(self, script: Any) -> Optional[str]:
+        """Create an expedition to mirror this workflow run.
+
+        Returns the expedition_id if successful, None if mirroring is disabled or fails.
+        """
+        if not self.mirror_enabled:
+            return None
+
+        try:
+            from lib.orchestration.ExpeditionManager import get_expedition_manager
+            manager = get_expedition_manager()
+
+            exp_id = manager.create_mirrored_expedition(
+                source="awflow",
+                run_id=self.run_id,
+                session_id=self.run_id,
+                name=getattr(script, "__name__", "workflow"),
+                description="awflow execution",
+                phases=[],
+                script_sha256="",
+                transcript_dir="",
+                host="aitheros",
+            )
+            logger.info(f"[awflow] Mirrored expedition {exp_id}")
+            return exp_id
+        except Exception as e:
+            logger.error(f"[awflow] Failed to create mirrored expedition: {e}")
+            return None
+
+    async def _post_mirror_event(self, event_type: str, event_data: dict) -> bool:
+        """Post an event to the mirrored expedition.
+
+        Returns True if the event was handled, False otherwise.
+        """
+        if not self.mirror_enabled or not self.mirror_expedition_id:
+            return False
+
+        try:
+            from lib.orchestration.ExpeditionManager import get_expedition_manager
+            manager = get_expedition_manager()
+
+            event = dict(event_data)
+            event["type"] = event_type
+            event["source"] = "awflow"
+
+            result = manager.mirror_event(self.run_id, event)
+            if not result.get("handled"):
+                logger.warning(
+                    f"[awflow] Mirror event not handled: {event_type} - "
+                    f"{result.get('reason', 'unknown')}"
+                )
+            return result.get("handled", False)
+        except Exception as e:
+            logger.error(f"[awflow] Failed to post mirror event {event_type}: {e}")
+            return False
 
     def _compute_call_hash(
         self,
@@ -778,7 +867,12 @@ async def _test_parallel_barrier():
     """Test: parallel has a barrier (all start before any complete)."""
     print("Testing parallel with barrier...")
     journal_stub = _JournalStub()
-    runtime = WorkflowRuntime(journal_stub, dispatcher=_stub_dispatcher, budget_tokens=1000000, concurrency_cap=2)
+    runtime = WorkflowRuntime(
+        journal_stub,
+        dispatcher=_stub_dispatcher,
+        budget_tokens=1000000,
+        concurrency_cap=2,
+    )
     _runtime_context.set(runtime)
 
     start_times = {}
@@ -831,7 +925,12 @@ async def _test_pipeline_no_barrier():
     """Test: pipeline has NO barrier (items can be at different stages concurrently)."""
     print("Testing pipeline without barrier...")
     journal_stub = _JournalStub()
-    runtime = WorkflowRuntime(journal_stub, dispatcher=_stub_dispatcher, budget_tokens=1000000, concurrency_cap=8)
+    runtime = WorkflowRuntime(
+        journal_stub,
+        dispatcher=_stub_dispatcher,
+        budget_tokens=1000000,
+        concurrency_cap=8,
+    )
     _runtime_context.set(runtime)
 
     stage_timings = {}
@@ -851,7 +950,7 @@ async def _test_pipeline_no_barrier():
         return context[0] + 1
 
     items = list(range(3))
-    results = await pipeline(items, stage1, stage2)
+    await pipeline(items, stage1, stage2)
 
     # Verify some items reached stage2 before all items finished stage1
     # This is the anti-barrier check
@@ -906,7 +1005,12 @@ async def _test_resume():
     """Test: resume replays matching calls and re-runs after divergence."""
     print("Testing resume capability...")
     journal_stub = _JournalStub()
-    runtime = WorkflowRuntime(journal_stub, dispatcher=_stub_dispatcher, budget_tokens=1000000, run_id="test-run-1")
+    runtime = WorkflowRuntime(
+        journal_stub,
+        dispatcher=_stub_dispatcher,
+        budget_tokens=1000000,
+        run_id="test-run-1",
+    )
     _runtime_context.set(runtime)
 
     # First call
