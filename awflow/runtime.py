@@ -69,6 +69,21 @@ class Budget:
         self._spent += amount
 
 
+def _mirror_description() -> str:
+    """What the mirrored expedition says it is. When a queue started this run it
+    passes WHY through the environment (`AWRUN_RUN_ID`, `AWRUN_LINEAGE_<KEY>`), and
+    that is carried onto the expedition so a run can be traced from either side."""
+    why = sorted((key[len("AWRUN_LINEAGE_"):].lower(), value)
+                 for key, value in os.environ.items()
+                 if key.startswith("AWRUN_LINEAGE_") and value)
+    if not why and not os.environ.get("AWRUN_RUN_ID"):
+        return "awflow execution"
+    parts = [f"{k}={v}" for k, v in why]
+    if os.environ.get("AWRUN_RUN_ID"):
+        parts.insert(0, f"run={os.environ['AWRUN_RUN_ID']}")
+    return "awflow execution [" + " ".join(parts) + "]"
+
+
 class WorkflowRuntime:
     """
     Deterministic workflow engine with journaling and resume capability.
@@ -536,7 +551,7 @@ class WorkflowRuntime:
                 run_id=self.run_id,
                 session_id=self.run_id,
                 name=getattr(script, "__name__", "workflow"),
-                description="awflow execution",
+                description=_mirror_description(),
                 phases=[],
                 script_sha256="",
                 transcript_dir="",

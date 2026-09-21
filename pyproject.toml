@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 # 2026-09-13: rename the distribution, keep the import name. The bump to 0.2.0
 # makes the exists-check unable to collide again. EIL001 asserts the owner.
 name = "aitherium-awflow"
-version = "0.2.0"
+version = "0.2.1"
 description = "Aither World Flow — a deterministic agent-workflow runtime: journaled agent calls, prefix-replay resume, barrier-free pipelines and a hard token budget."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -251,6 +251,27 @@ def set_concurrency_cap(n: int) -> None:
 # ===== Main Entry Point =====
 
 
+async def _load_replay(jnl: Any, rt: Any) -> int:
+    """Seed the runtime's replay cache from an existing journal.
+
+    The journal is the checkpoint: every AGENT_CALL that already has an answer is
+    handed back to the script by hash, so a resumed run replays those calls instead
+    of making -- and paying for -- them again. A call journaled WITHOUT an answer
+    (it failed) is not seeded, so the resumed run retries it live. Returns how many
+    distinct calls were seeded.
+    """
+    records, _corrupt = await jnl.read_records()
+    for record in records:
+        if record.get("type") != "AGENT_CALL" or record.get("response") is None:
+            continue
+        call_hash = record.get("call_hash")
+        if not call_hash:
+            continue
+        answer = record.get("response_json")
+        rt._replay_prefix[call_hash] = answer if answer is not None else record["response"]
+    return len(rt._replay_prefix)
+
+
 async def run_workflow(
     script: Callable[..., Awaitable[Any]],
     *,
@@ -258,6 +279,7 @@ async def run_workflow(
     resume_from: Optional[str] = None,
     budget_tokens: int = 1000000,
     mirror: bool = True,
+    dispatcher: Optional[Any] = None,
 ) -> Any:
     """Execute a workflow script with journaling and optional resume.
 
@@ -272,6 +294,8 @@ async def run_workflow(
         budget_tokens: total token budget (default: 1000000)
         mirror: whether to mirror this run as an expedition (default: True);
                can be disabled via env AITHER_AWFLOW_MIRROR=0
+        dispatcher: replaces the real model call. Tests only -- the default is
+                   the live dispatcher, and nothing else selects a fake one
 
     Returns:
         The return value of the script
@@ -319,11 +343,19 @@ async def run_workflow(
             budget_tokens=budget_tokens,
             run_id=run_id,
             mirror_enabled=mirror,
+            dispatcher=dispatcher,
         )
     except Exception as e:
         if isinstance(e, runtime.BudgetExhausted):
             raise BudgetExhausted(str(e)) from e
         raise ValueError(f"failed to initialize runtime: {e}") from e
+
+    # Resuming: read what this run already did BEFORE writing anything new.
+    if resume_from:
+        try:
+            rt.resumed_calls = await _load_replay(jnl, rt)
+        except journal.JournalError as e:
+            raise JournalError(f"cannot resume {run_id}: {e}") from e
 
     # Run script with runtime in context
     token = _current_runtime.set(rt)
