@@ -543,10 +543,9 @@ class WorkflowRuntime:
             return None
 
         try:
-            from lib.orchestration.ExpeditionManager import get_expedition_manager
-            manager = get_expedition_manager()
+            from lib.orchestration.expedition_intake import create_mirror
 
-            exp_id = manager.create_mirrored_expedition(
+            exp_id = create_mirror(
                 source="awflow",
                 run_id=self.run_id,
                 session_id=self.run_id,
@@ -572,14 +571,13 @@ class WorkflowRuntime:
             return False
 
         try:
-            from lib.orchestration.ExpeditionManager import get_expedition_manager
-            manager = get_expedition_manager()
+            from lib.orchestration.expedition_intake import post_mirror_event
 
             event = dict(event_data)
             event["type"] = event_type
             event["source"] = "awflow"
 
-            result = manager.mirror_event(self.run_id, event)
+            result = post_mirror_event(self.run_id, event)
             if not result.get("handled"):
                 logger.warning(
                     f"[awflow] Mirror event not handled: {event_type} - "
