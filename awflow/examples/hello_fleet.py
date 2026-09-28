@@ -16,10 +16,10 @@ import asyncio
 import sys
 from pathlib import Path
 
-# Add parent to path so we can import awflow
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
+# The directory holding the awflow package, whichever copy this is
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from lib.orchestration import awflow
+import awflow
 
 
 async def hello_fleet():

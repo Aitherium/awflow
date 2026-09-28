@@ -25,51 +25,61 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
-#: Standalone fallbacks for the two monorepo helpers this module needs.
-#:
-#: AWFL002 fires on the shipped path: `from lib.core...` is a HARD ImportError
-#: for anyone who `pip install awflow`, because `lib/` is not on their path --
-#: not a cosmetic leak, and the whole cloud-dispatch path would be dead for
-#: every installer while every check inside the monorepo reads green. The fleet
-#: keeps the real helpers (the try wins whenever `lib` is importable, so
-#: in-fleet behaviour is unchanged); everyone else gets a faithful, smaller
-#: implementation of the same contract.
-try:                                    # fleet: the shared resolver + client
-    from lib.core.AitherHttp import AsyncClient  # noqa: F401
-    from lib.core.AitherPorts import get_service_url  # noqa: F401
-except ImportError:                     # pip-installed brick: resolve it here
-    import httpx  # declared dependency of this package
+import httpx  # declared dependency of this package
 
-    def get_service_url(name: str) -> str:
-        """Env-first resolution, the same contract the fleet resolver honours.
 
-        A brick that cannot answer this for itself is not installable, and one
-        that GUESSES a URL is worse: it fails at the network layer with a name
-        nobody can act on. So an unset variable is a refusal that names the
-        variable to set, never a default endpoint.
-        """
-        key = "AITHER_" + name.upper() + "_URL"
-        url = os.environ.get(key)
-        if not url:
-            raise RuntimeError(
-                f"{key} is not set, and this is not an AitherOS checkout (the "
-                f"fleet resolver lives in lib.core.AitherPorts). Point {key} at "
-                f"your {name} endpoint, e.g. {key}=https://api.aitherium.com"
-            )
-        return url
+def _env_service_url(name: str) -> str:
+    """Env-first resolution: ``AITHER_<NAME>_URL``.
 
-    class AsyncClient:                  # noqa: D101 - mirrors the fleet class
-        """The one method this module uses, over the declared httpx dependency.
+    A brick that cannot answer this for itself is not installable, and one that
+    GUESSES a URL is worse: it fails at the network layer with a name nobody can
+    act on. So an unset variable is a refusal that names the variable to set,
+    never a default endpoint. A host with its own service registry installs it
+    with :func:`configure`.
+    """
+    key = "AITHER_" + name.upper() + "_URL"
+    url = os.environ.get(key)
+    if not url:
+        raise RuntimeError(
+            f"{key} is not set and no host resolver was configured "
+            f"(awflow.dispatch.configure). Point {key} at your {name} endpoint, "
+            f"e.g. {key}=https://api.aitherium.com"
+        )
+    return url
 
-        TLS is VERIFIED here (httpx default). The fleet client disables
-        verification because it speaks to in-network services over a private
-        CA; an off-fleet caller reaches a public endpoint and must not inherit
-        that exception.
-        """
 
-        async def post(self, url, **kwargs):
-            async with httpx.AsyncClient() as client:
-                return await client.post(url, **kwargs)
+class _HttpxAsyncClient:
+    """The one method this module uses, over the declared httpx dependency.
+
+    TLS is VERIFIED here (httpx default). A host that speaks to in-network
+    services over a private CA installs its own client with :func:`configure`;
+    a caller reaching a public endpoint must not inherit that exception.
+    """
+
+    async def post(self, url, **kwargs):
+        async with httpx.AsyncClient() as client:
+            return await client.post(url, **kwargs)
+
+
+#: The resolver and client this module calls. Standalone by default; a host
+#: (a platform with a service registry and an internal CA) swaps them in via
+#: configure() -- awflow never imports the host.
+get_service_url = _env_service_url
+AsyncClient = _HttpxAsyncClient
+
+
+def configure(*, get_service_url=None, async_client=None) -> None:  # noqa: A002
+    """Install a host's service resolver and/or async HTTP client class.
+
+    ``get_service_url(name) -> str``; ``async_client`` is a class whose instances
+    expose ``await .post(url, **kwargs)``. ``None`` leaves that one unchanged.
+    """
+    g = globals()
+    if get_service_url is not None:
+        g["get_service_url"] = get_service_url
+    if async_client is not None:
+        g["AsyncClient"] = async_client
+
 
 try:
     import jsonschema

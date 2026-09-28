@@ -97,8 +97,32 @@ async def run_test_workflow():
         return False
 
 
-def main():
-    """Main entry point for --self-test."""
+USAGE = """usage: awflow [-h] [--self-test]
+
+awflow -- deterministic, journaled multi-agent workflow runtime (a library).
+Import it from a workflow script: agent(), parallel(), pipeline(), phase(),
+log(), get_budget(), run_workflow().
+
+  --self-test   run a stub workflow offline (no LLM calls); exit 0 pass, 1 fail
+  -h, --help    show this help and exit
+"""
+
+
+def main(argv=None):
+    """Console entry point: `awflow --self-test` (bare `awflow` also self-tests).
+
+    `--help` used to fall through to the self-test, which imports the fleet
+    stack and takes ~25 s -- an agent asking for usage got a workflow run.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
+    if any(a in ("-h", "--help") for a in args):
+        print(USAGE)
+        return 0
+    unknown = [a for a in args if a != "--self-test"]
+    if unknown:
+        print("awflow: unrecognized arguments: " + " ".join(unknown), file=sys.stderr)
+        print(USAGE, file=sys.stderr)
+        return 2
     try:
         success = asyncio.run(run_test_workflow())
         if success:
@@ -118,8 +142,4 @@ def main():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--self-test":
-        sys.exit(main())
-    else:
-        print("Usage: python -m AitherOS.lib.orchestration.awflow --self-test")
-        sys.exit(1)
+    sys.exit(main())

@@ -5,9 +5,9 @@ import sys
 from pathlib import Path
 
 # Add parent to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from lib.orchestration import awflow
+import awflow
 
 
 async def hello_fleet_run1():

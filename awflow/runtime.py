@@ -69,6 +69,19 @@ class Budget:
         self._spent += amount
 
 
+#: Where a run is mirrored as an expedition. awflow ships standalone and knows
+#: no tracker: a host installs ``create(**fields) -> expedition_id`` and
+#: ``post(run_id, event) -> {"handled": bool, ...}`` with set_mirror_hooks().
+#: Until then mirroring is off and a run simply is not mirrored.
+_MIRROR_HOOKS: dict = {"create": None, "post": None}
+
+
+def set_mirror_hooks(create=None, post=None) -> None:
+    """Install (or, with ``None``, clear) the expedition-mirror hooks."""
+    _MIRROR_HOOKS["create"] = create
+    _MIRROR_HOOKS["post"] = post
+
+
 def _mirror_description() -> str:
     """What the mirrored expedition says it is. When a queue started this run it
     passes WHY through the environment (`AWRUN_RUN_ID`, `AWRUN_LINEAGE_<KEY>`), and
@@ -542,10 +555,11 @@ class WorkflowRuntime:
         if not self.mirror_enabled:
             return None
 
+        if _MIRROR_HOOKS["create"] is None:
+            logger.debug("[awflow] no mirror hook installed; run is not mirrored")
+            return None
         try:
-            from lib.orchestration.expedition_intake import create_mirror
-
-            exp_id = create_mirror(
+            exp_id = _MIRROR_HOOKS["create"](
                 source="awflow",
                 run_id=self.run_id,
                 session_id=self.run_id,
@@ -570,14 +584,14 @@ class WorkflowRuntime:
         if not self.mirror_enabled or not self.mirror_expedition_id:
             return False
 
+        if _MIRROR_HOOKS["post"] is None:
+            return False
         try:
-            from lib.orchestration.expedition_intake import post_mirror_event
-
             event = dict(event_data)
             event["type"] = event_type
             event["source"] = "awflow"
 
-            result = post_mirror_event(self.run_id, event)
+            result = _MIRROR_HOOKS["post"](self.run_id, event)
             if not result.get("handled"):
                 logger.warning(
                     f"[awflow] Mirror event not handled: {event_type} - "
