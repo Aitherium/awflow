@@ -1,0 +1,38 @@
+# awflow
+
+> A deterministic workflow runtime — chain agent calls with journal replay and budget control.
+
+Workflows need deterministic orchestration with journaled execution so every call, every branch decision, and every result can be captured and replayed from any point. Agents running a workflow need to see the same progression whether they are in the middle of a live run or resuming from an earlier checkpoint.
+
+## Install
+
+```
+pip install aitherium-awflow
+```
+
+## In Claude Code
+
+- skill: `/awflow`
+
+## Use it in 30 seconds
+
+Chain parallel and sequential agent calls with deterministic ordering, a persistent journal, and hard budget enforcement. Replay from the journal at any breakpoint.
+
+## Composes with
+
+- [awdk](https://aitherium.github.io/awdk/) — Build AI agent fleets — 3 lines, any backend, local or cloud.
+- [awrun](https://aitherium.github.io/awrun/) — A priority-aware queue and dispatcher for agentic runs and ad-hoc CI builds. It also judges whether the runner pool is big enough for the queue it is draining, and can ask a host to grow it -- reserving capacity is zero-sum, so a saturated pool needs more of it, not a different share of it.
+- [awask](https://aitherium.github.io/awask/) — Your agent asks you a question — and acts on your answer.
+- [awrelay](https://aitherium.github.io/awrelay/) — Portable agent messaging — findings, alerts, coordination.
+- [awm](https://aitherium.github.io/awm/) — A portable, scoped agent memory.
+- [awgraph](https://aitherium.github.io/awgraph/) — A semantic code graph for agents — AST + tree-sitter, call graphs.
+
+## Where it lives
+
+- Repo: https://github.com/Aitherium/awflow
+- Docs: https://aitherium.github.io/awflow/
+- Manifest (keys + the one-line adoption story): https://aitherium.github.io/awflow/aither-manifest.json
+
+This repository is mirrored from the AitherOS monorepo by `.github/workflows/sync-awflow.yml`; hand edits made here are overwritten on the next sync — change the source instead.
+
+Everything Aitherium, in one file for agents: https://aitherium.com/llms.txt
