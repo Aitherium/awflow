@@ -10,6 +10,10 @@ Workflows need deterministic orchestration with journaled execution so every cal
 pip install aitherium-awflow
 ```
 
+## In Claude Code
+
+- skill: `/awflow`
+
 ## Use it in 30 seconds
 
 Chain parallel and sequential agent calls with deterministic ordering, a persistent journal, and hard budget enforcement. Replay from the journal at any breakpoint.
