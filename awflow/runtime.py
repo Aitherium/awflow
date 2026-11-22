@@ -115,12 +115,18 @@ class WorkflowRuntime:
         run_id: Optional[str] = None,
         dispatcher: Optional[Any] = None,
         mirror_enabled: bool = True,
+        lanes: Optional[list] = None,
     ):
         # An INJECTED dispatcher is the only way to get a fake one. The default
         # is the real MicroScheduler call in dispatch.py; a test that wants a
         # stub must pass one explicitly. The previous shape had the stub as the
         # DEFAULT, so every self-test passed without ever touching the network.
         self._dispatcher = dispatcher
+        # Lane ladder for step(): None means the standard local->cloud->runner
+        # ladder, built lazily. A list of Lane objects is how a test or a host
+        # installs its own (fake) lanes.
+        self._lanes = lanes
+        self._lane_disp: Optional[Any] = None
         self._last_tokens: Optional[int] = None
         self.journal = journal
         self.budget = Budget(budget_tokens)
@@ -174,7 +180,7 @@ class WorkflowRuntime:
 
         # Estimate tokens (loose bound: prompt + response)
         # Allocate 2x max_tokens (estimate for both input and output context)
-        prompt_tokens = 2 * (max_tokens or 100)  # Allocate input + output estimate
+        prompt_tokens = 2 * (100 if max_tokens is None else max_tokens)
         self.budget.allocate(prompt_tokens)
 
         # Compute call hash for determinism
@@ -323,6 +329,34 @@ class WorkflowRuntime:
             self._replay_prefix[call_hash] = response_json if schema else response
 
         return response_json if schema else response
+
+    def _lane_dispatcher(self):
+        """The lane dispatcher for step(), built once from this runtime's ladder."""
+        if self._lane_disp is None:
+            from . import lanes as _lanes
+            self._lane_disp = _lanes.LaneDispatcher(
+                lanes=self._lanes if self._lanes is not None else _lanes.default_lanes(),
+                journal=self.journal,
+                run_id=self.run_id,
+            )
+        return self._lane_disp
+
+    async def step(self, payload: str, needs: Any, *, label: Optional[str] = None):
+        """Run ONE step on the cheapest lane that can serve it; fail over on error.
+
+        ``needs`` is a :class:`awflow.lanes.StepNeeds` or a dict of its fields.
+        Every attempt is journaled as a ``LANE_DISPATCH`` record carrying
+        ``served_by``, latency, tokens and cost. Returns the winning
+        :class:`awflow.lanes.LaneResult` (``ok`` False when every lane failed);
+        raises :class:`awflow.lanes.NoLaneError` only when NO lane can serve the
+        declaration at all -- a refusal that names each lane's reason.
+        """
+        from . import lanes as _lanes
+        if isinstance(needs, dict):
+            needs = _lanes.StepNeeds(**needs)
+        if not isinstance(needs, _lanes.StepNeeds):
+            raise TypeError("needs must be StepNeeds or a dict of its fields")
+        return await self._lane_dispatcher().dispatch(payload, needs, label=label)
 
     async def parallel(
         self, thunks: list[Awaitable[T]]
@@ -722,7 +756,7 @@ class WorkflowRuntime:
             schema=schema_dict,
             temperature=temperature,
             seed=seed,
-            max_tokens=max_tokens or 2048,
+            max_tokens=2048 if max_tokens is None else max_tokens,
             effort=effort,
         )
         if tokens is not None:
@@ -766,6 +800,17 @@ async def agent(
         seed=seed,
         max_tokens=max_tokens,
     )
+
+
+async def step(payload: str, needs: Any, *, label: Optional[str] = None):
+    """Run one step on the cheapest lane that can serve it (context-dependent).
+
+    See :meth:`WorkflowRuntime.step`; ``needs`` is a StepNeeds or a dict.
+    """
+    runtime = _runtime_context.get()
+    if runtime is None:
+        raise RuntimeError("step() called outside run_workflow()")
+    return await runtime.step(payload, needs, label=label)
 
 
 async def parallel(thunks: list[Awaitable[T]]) -> list[Union[T, None]]:

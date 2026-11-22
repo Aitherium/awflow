@@ -4,7 +4,7 @@
 
 **[Docs](https://aitherium.github.io/awflow/)**  ·  [Source](https://github.com/Aitherium/awflow)  ·  `pip install aitherium-awflow`  ·  [The Aither World](https://aitherium.github.io/)
 
-> **The Aither World** is an operating system for agents — a Linux you can hand to one, the runtimes it works in, and the tools it works with. [awnix](https://github.com/Aitherium/awnix) is the Linux underneath it; **awflow** is one of its 72 bricks — each installs on its own, runs offline, and needs no account. 6 more are in development and 19 are planned.
+> **The Aither World** is an operating system for agents — a Linux you can hand to one, the runtimes it works in, and the tools it works with. [awnix](https://github.com/Aitherium/awnix) is the Linux underneath it; **awflow** is one of its 71 bricks — each installs on its own, runs offline, and needs no account. 7 more are in development and 19 are planned.
 >
 > **Start here:** Chain parallel and sequential agent calls with deterministic ordering, a persistent journal, and hard budget enforcement. Replay from the journal at any breakpoint.
 
@@ -53,6 +53,57 @@ When you ask for a schema-constrained response, awflow:
 4. Returns None if all retries fail (caller filters Nones)
 
 This belt-and-braces approach works whether or not the backend honors constrained decoding.
+
+## Lane selection: run each step where it is cheapest
+
+`agent()` always lands on the same backend. `step()` picks a lane per step from
+what the step declares, cheapest first, and fails over along that order:
+
+```python
+from awflow import step
+
+# a small prompt: the free local pool first, cloud only if local refuses/fails
+await step("summarise this diff", {"kind": "llm", "input_chars": 4000})
+
+# a huge prompt: local refuses it (prefill cannot finish in the deadline) -> cloud
+await step(big_prompt, {"kind": "llm", "input_chars": 250_000})
+
+# public-safe compute: free GitHub-hosted runners on the public aw* mirrors
+await step(tasks_json, {"kind": "compute", "public_safe": True, "job": "swarm"})
+```
+
+`step()` returns a `LaneResult` (`ok`, `lane`, `served_by`, `tokens`,
+`latency_ms`, `cost_usd`) and journals one `LANE_DISPATCH` record per attempt.
+`LaneDispatcher.fan_out()` runs many steps concurrently — the swarm — routing
+each independently and gating how many run per lane at once.
+
+| lane | cheapest when | refuses |
+|---|---|---|
+| `local` | an llm step under the local input cap with a free pool slot | too-large input, a saturated pool, compute with no host transport |
+| `cloud` | local cannot take the step, or as overflow | `require_local`, `allow_cloud=False`, compute |
+| `runner` | **public-safe** compute — free minutes on public repos | any llm step (no credential — see below), a step not declared public-safe |
+
+A step is `public_safe` only when its inputs and outputs are already public.
+The default is **false**, so private work can never reach the free public lane
+by omission.
+
+The `cloud` lane is DeepSeek Flash **through the awrouter at `127.0.0.1:8286`**
+(`AWFLOW_CLOUD_URL` overrides it) — the same cloud path Claude sessions use.
+It is deliberately *not* MicroScheduler: that scheduler steers a cloud DeepSeek
+model back to the local pool (the paid `api.deepseek.com` account is dark by
+owner order, 2026-11-12), so a "cloud" lane pointed there would silently be
+local. Local first, router cloud as the real overflow.
+
+### Runner credentials — no new CI secrets
+
+The runner lane is **non-LLM compute only**. `provision_gateway_key` needs
+`AITHER_INTERNAL_SECRET` and an authenticated caller, `awpermit` has no gateway
+door that verifies it, and `tokengate` is a router, not a credential — so a
+GitHub-hosted runner is given no credential by awflow. A model call on a runner
+is only the in-job CPU model that `awrun`'s `bonsai-swarm.yml` already loads.
+Transports are injectable: `RunnerLane(dispatch_fn=github_actions_transport(
+"Aitherium/awrun", "swarm.yml"))` triggers a run and records its pointer; the
+caller collects the artifact (`awrun swarm` already does).
 
 ## Determinism guarantee
 
@@ -169,7 +220,6 @@ Every repository here is public. Each publishes an `aither-manifest.json` beside
 | [awnode](https://github.com/Aitherium/awnode) | A lightweight local gateway — bridges your apps to the AI backends you chose | [docs](https://aitherium.github.io/awnode/) |
 | [awrun](https://github.com/Aitherium/awrun) | A priority-aware queue and dispatcher for agentic runs and ad-hoc CI builds. It also judges whether the runner pool is big enough for the queue it is draining, and can ask a host to grow it -- reserving capacity is zero-sum, so a saturated pool needs more of it, not a different share of it | [docs](https://aitherium.github.io/awrun/) |
 | [awpool](https://github.com/Aitherium/awpool) | The free half of the elastic work pool: dispatches public-safe work onto the free GitHub-hosted runners of the public aw* mirrors, so their idle CI minutes become compute. awrun remains the paid/self-hosted lane; this is its free twin | [docs](https://aitherium.github.io/awpool/) |
-| [awedgerunner](https://github.com/Aitherium/awedgerunner) | Run agent and CI work on edge runners nobody has to rack -- a volunteer's idle GPU, a phone on your own mesh, an edge worker, a free or spot CI runner -- under a lease with a hard budget cap, a named payer and an expiry | [docs](https://aitherium.github.io/awedgerunner/) |
 | [awgraph](https://github.com/Aitherium/awgraph) | A semantic code graph for agents — AST + tree-sitter, call graphs | [docs](https://aitherium.github.io/awgraph/) |
 | [awgit](https://github.com/Aitherium/awgit) | Semantic version control on top of git — edit-ops and leases | [docs](https://aitherium.github.io/awgit/) |
 | [awdelphi](https://github.com/Aitherium/awdelphi) | Anonymous multi-round expert panels — a converged answer with a trace | [docs](https://aitherium.github.io/awdelphi/) |

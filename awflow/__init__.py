@@ -29,7 +29,13 @@ logger = logging.getLogger(__name__)
 
 # Import sibling modules with error handling
 try:
-    from . import dispatch, journal, runtime  # noqa: F401 - re-exported; see __all__
+    from . import dispatch, journal, lanes, runtime  # noqa: F401 - re-exported; see __all__
+    from .lanes import (  # noqa: F401 - public names; see __all__
+        LaneDispatcher,
+        LaneResult,
+        NoLaneError,
+        StepNeeds,
+    )
 except ImportError as e:
     raise ImportError(
         f"Failed to import awflow submodules. "
@@ -118,6 +124,31 @@ async def agent(
     return await rt.agent(
         prompt, schema=schema, label=label, phase=phase, model=model, effort=effort
     )
+
+
+async def step(payload: str, needs: Any, *, label: Optional[str] = None) -> Any:
+    """Run one step on the cheapest lane that can serve it (inside run_workflow).
+
+    ``needs`` is an :class:`awflow.lanes.StepNeeds` or a dict of its fields:
+    ``kind`` ("llm"|"compute"), ``public_safe``, ``input_chars``, ``max_tokens``,
+    ``deadline_s``, ``require_local``, ``allow_cloud``, ``model``, ``job``.
+
+    Returns an ``awflow.lanes.LaneResult`` (``ok``, ``lane``, ``served_by``,
+    ``tokens``, ``latency_ms``, ``cost_usd``). Raises ``NoLaneError`` only when
+    no lane can serve the declaration at all.
+
+    Args:
+        payload: the prompt (llm) or command/description (compute) to run
+        needs: what the step needs, as a StepNeeds or a dict
+        label: narrative label recorded on the LANE_DISPATCH journal record
+
+    Raises:
+        RuntimeError: if called outside run_workflow()
+    """
+    rt = _current_runtime.get()
+    if rt is None:
+        raise RuntimeError("step() called outside of run_workflow()")
+    return await rt.step(payload, needs, label=label)
 
 
 async def parallel(thunks: list[Awaitable[Any]]) -> list[Any]:
@@ -280,6 +311,7 @@ async def run_workflow(
     budget_tokens: int = 1000000,
     mirror: bool = True,
     dispatcher: Optional[Any] = None,
+    lanes: Optional[list] = None,
 ) -> Any:
     """Execute a workflow script with journaling and optional resume.
 
@@ -296,6 +328,8 @@ async def run_workflow(
                can be disabled via env AITHER_AWFLOW_MIRROR=0
         dispatcher: replaces the real model call. Tests only -- the default is
                    the live dispatcher, and nothing else selects a fake one
+        lanes: replaces the lane ladder used by step(). Tests and hosts only;
+               the default is local->cloud->runner (see awflow.lanes)
 
     Returns:
         The return value of the script
@@ -344,6 +378,7 @@ async def run_workflow(
             run_id=run_id,
             mirror_enabled=mirror,
             dispatcher=dispatcher,
+            lanes=lanes,
         )
     except Exception as e:
         if isinstance(e, runtime.BudgetExhausted):
@@ -483,6 +518,7 @@ async def run_workflow(
 __all__ = [
     "run_workflow",
     "agent",
+    "step",
     "parallel",
     "pipeline",
     "phase",
@@ -493,4 +529,10 @@ __all__ = [
     "set_concurrency_cap",
     "BudgetExhausted",
     "JournalError",
+    # Lane selection (per-step: cheapest lane that can serve the step)
+    "lanes",
+    "StepNeeds",
+    "LaneResult",
+    "LaneDispatcher",
+    "NoLaneError",
 ]
