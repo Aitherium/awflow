@@ -414,6 +414,25 @@ def parse_anthropic_reply(data: Dict[str, Any]) -> Tuple[str, Optional[int]]:
     return text, (total or None)
 
 
+def cloud_request_body(payload: str, needs: StepNeeds) -> Dict[str, Any]:
+    """The Anthropic Messages body the cloud lane sends.
+
+    ``thinking`` is DISABLED on purpose. The router's DeepSeek is a reasoning
+    model: with thinking on (the default when the field is absent) it spends the
+    whole ``max_tokens`` budget on thinking blocks and returns NO text block --
+    measured 2026-11-22, a 320-token skeptic reply came back thinking-only and
+    the lane read it as "empty answer", so every cloud fallback failed. A
+    workflow step wants a terse answer, not a transcript of reasoning, and the
+    router maps ``{"type": "disabled"}`` to a non-thinking DeepSeek request.
+    """
+    return {
+        "model": needs.model or DEFAULT_CLOUD_MODEL,
+        "max_tokens": needs.max_tokens,
+        "thinking": {"type": "disabled"},
+        "messages": [{"role": "user", "content": payload}],
+    }
+
+
 def default_lanes() -> List[Lane]:
     """The standard lane ladder, cheapest first.
 
@@ -434,9 +453,19 @@ def default_lanes() -> List[Lane]:
                       "supply one); refusing to treat a payload as a command")
         errs: List[str] = []
         for model in DEFAULT_LOCAL_MODELS:
-            result, tokens, err = await dispatch_agent_call(
-                payload, model=needs.model or model,
-                max_tokens=needs.max_tokens)
+            # ``deadline_s`` is a DECLARATION, so honour it: a busy pool can
+            # otherwise hold a step for the transport's own 120s timeout, and
+            # a fan-out pays that on every item. A timed-out attempt fails
+            # over to the next model (then cloud), exactly like an error.
+            try:
+                result, tokens, err = await asyncio.wait_for(
+                    dispatch_agent_call(payload, model=needs.model or model,
+                                        max_tokens=needs.max_tokens),
+                    timeout=needs.deadline_s)
+            except asyncio.TimeoutError:
+                errs.append(f"{model}: no reply within "
+                            f"{needs.deadline_s:.0f}s (deadline_s)")
+                continue
             if err is None and result is not None:
                 return LaneResult(ok=True, lane="local", served_by=model,
                                   result=result, tokens=tokens)
@@ -448,12 +477,7 @@ def default_lanes() -> List[Lane]:
         # (dark by owner order) and NOT MicroScheduler (which steers a cloud
         # DeepSeek model back to the local pool -> a false "cloud" lane).
         base = (os.environ.get(CLOUD_URL_ENV) or DEFAULT_CLOUD_URL).rstrip("/")
-        model = needs.model or DEFAULT_CLOUD_MODEL
-        body = {
-            "model": model,
-            "max_tokens": needs.max_tokens,
-            "messages": [{"role": "user", "content": payload}],
-        }
+        body = cloud_request_body(payload, needs)
         try:
             import httpx
             async with httpx.AsyncClient(timeout=needs.deadline_s) as client:
@@ -476,8 +500,8 @@ def default_lanes() -> List[Lane]:
         if not text:
             return LaneResult(ok=False, lane="cloud",
                               error="cloud: empty answer")
-        return LaneResult(ok=True, lane="cloud", served_by=model, result=text,
-                          tokens=tokens,
+        return LaneResult(ok=True, lane="cloud", served_by=body["model"],
+                          result=text, tokens=tokens,
                           cost_usd=(float(tokens or 0) / 1e6) * CLOUD_USD_PER_MTOK)
 
     return [
@@ -645,5 +669,5 @@ __all__ = [
     "LocalLane", "CloudLane", "RunnerLane",
     "LaneDispatcher", "default_lanes", "plan", "refusals",
     "github_actions_argv", "github_actions_transport", "RUNNER_MAX_INLINE_CHARS",
-    "parse_anthropic_reply",
+    "parse_anthropic_reply", "cloud_request_body",
 ]

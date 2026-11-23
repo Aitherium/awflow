@@ -312,6 +312,8 @@ async def run_workflow(
     mirror: bool = True,
     dispatcher: Optional[Any] = None,
     lanes: Optional[list] = None,
+    run_id: Optional[str] = None,
+    stage_timeout_s: Optional[float] = None,
 ) -> Any:
     """Execute a workflow script with journaling and optional resume.
 
@@ -330,6 +332,11 @@ async def run_workflow(
                    the live dispatcher, and nothing else selects a fake one
         lanes: replaces the lane ladder used by step(). Tests and hosts only;
                the default is local->cloud->runner (see awflow.lanes)
+        run_id: name this run (a caller that wants to read the journal by id,
+               such as the ultracode runner, passes one); defaults to a UUID.
+               Ignored when resume_from is set -- that id IS the run.
+        stage_timeout_s: per-pipeline-stage bound, including time waiting on a
+               shared lane gate. ``None`` -> AWFLOW_STAGE_TIMEOUT_S or 300 s.
 
     Returns:
         The return value of the script
@@ -360,7 +367,7 @@ async def run_workflow(
         journal_root.mkdir(parents=True, exist_ok=True)
 
     # Use resume_from as run_id, or generate a new one
-    run_id = resume_from or str(uuid.uuid4())
+    run_id = resume_from or run_id or str(uuid.uuid4())
 
     # Create journal
     try:
@@ -379,6 +386,7 @@ async def run_workflow(
             mirror_enabled=mirror,
             dispatcher=dispatcher,
             lanes=lanes,
+            stage_timeout_s=stage_timeout_s,
         )
     except Exception as e:
         if isinstance(e, runtime.BudgetExhausted):

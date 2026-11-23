@@ -105,6 +105,51 @@ Transports are injectable: `RunnerLane(dispatch_fn=github_actions_transport(
 "Aitherium/awrun", "swarm.yml"))` triggers a run and records its pointer; the
 caller collects the artifact (`awrun swarm` already does).
 
+## Ultracode: plan, fan out, verify, synthesize
+
+`agent()` is one call and `step()` is one routed call. `ultracode` is the
+multi-agent SHAPE on top of both — the one Claude Code uses for hard work, now
+native to Aither:
+
+```
+scout -> work (pipeline over items, no barrier) -> verify (n skeptics,
+refute by default) -> completeness critic (loop until dry) -> synthesize
+```
+
+```python
+from awflow import ultracode as U
+
+plan = U.plan_workflow(
+    "audit the 10 newest merged PRs for missing tests",
+    items=[{"id": "pr-1", "title": "PR 1", "payload": diff_text}],
+    budget_tokens=120_000, verify_skeptics=2)
+result = await U.run_plan(plan, progress=lambda e: print(e["type"]))
+print(result.synthesis, result.local_share, result.journal_path)
+```
+
+What the plan and result guarantee:
+
+- **Pipeline by default.** A verify of item 3 never waits for item 7's work.
+- **Refute by default.** CONFIRMED needs every skeptic to have run and failed
+  to refute; a failed/empty/ambiguous skeptic refutes. An unproven finding is
+  not confirmed.
+- **No silent caps.** An oversized work list, a budget below the estimate, or a
+  critic that never goes dry is refused or reported (`complete: false`), never
+  truncated silently.
+- **Budget is hard.** Tokens are reserved before each step and settled after;
+  crossing the ceiling raises `BudgetExhausted` (even through `pipeline()`,
+  which otherwise swallows stage exceptions).
+- **Lanes are measured, not claimed.** `lanes_used` and `local_share` are read
+  back from the run's `LANE_DISPATCH` journal records.
+- **Resumable + watchable.** The run is an ordinary awflow run (journal,
+  `resume_from`, expedition mirror) and is also written as an Agent Notebook
+  when `lib.orchestration.NotebookStore` is available.
+
+The `workflow_plan` / `workflow_run` / `workflow_status` MCP tools
+(`apps/awnode/tools/mcp/mcp_ultracode.py`) expose the same capability to any
+agent; the patterns and pitfalls are documented in
+`config/skills/ultracode-workflows.skill.md`.
+
 ## Determinism guarantee
 
 **Replay returns RECORDED answers, not LLM re-computation.** The call hash is deterministic (prompt + model + schema + effort + temperature + seed). The world is not. Fleet backend selection, sampling, and rate-limit state are environmental. When you resume a workflow, agent calls that exactly match their recorded hash return the recorded response; all others go live.

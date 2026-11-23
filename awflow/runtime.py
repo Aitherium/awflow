@@ -116,6 +116,7 @@ class WorkflowRuntime:
         dispatcher: Optional[Any] = None,
         mirror_enabled: bool = True,
         lanes: Optional[list] = None,
+        stage_timeout_s: Optional[float] = None,
     ):
         # An INJECTED dispatcher is the only way to get a fake one. The default
         # is the real MicroScheduler call in dispatch.py; a test that wants a
@@ -132,6 +133,14 @@ class WorkflowRuntime:
         self.budget = Budget(budget_tokens)
         self.run_id = run_id or str(uuid.uuid4())
         self.concurrency_cap = concurrency_cap or min(16, (os.cpu_count() or 4) - 2)
+        # A pipeline stage is bounded so one wedged call cannot hang a run. The
+        # cap covers WAITING on a shared lane gate as well as the call itself,
+        # so a fan-out on a one-slot lane needs a budget sized to the work list
+        # (a 10-item fan-out queues ~10 stages of ~50 s behind that slot, which
+        # the old fixed 300 s turned into ten dropped items -- measured
+        # 2026-11-22). Default 300 s preserves existing behaviour.
+        self.stage_timeout_s = float(
+            stage_timeout_s or os.environ.get("AWFLOW_STAGE_TIMEOUT_S", 300.0))
         self.agent_call_count = 0
         self.semaphore = asyncio.Semaphore(self.concurrency_cap)
         self.sequence = 0
@@ -463,7 +472,7 @@ class WorkflowRuntime:
 
                     prev_result = await asyncio.wait_for(
                         stage((prev_result, current_item, item_index), stage_index),
-                        timeout=300.0,  # 5 min timeout per stage
+                        timeout=self.stage_timeout_s,  # per-stage bound; see __init__
                     )
 
                     stage_ends[key] = time.time()
