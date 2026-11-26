@@ -4,7 +4,7 @@
 
 **[Docs](https://aitherium.github.io/awflow/)**  ·  [Source](https://github.com/Aitherium/awflow)  ·  `pip install aitherium-awflow`  ·  [The Aither World](https://aitherium.github.io/)
 
-> **The Aither World** is an operating system for agents — a Linux you can hand to one, the runtimes it works in, and the tools it works with. [awnix](https://github.com/Aitherium/awnix) is the Linux underneath it; **awflow** is one of its 72 bricks — each installs on its own, runs offline, and needs no account. 6 more are in development and 19 are planned.
+> **The Aither World** is an operating system for agents — a Linux you can hand to one, the runtimes it works in, and the tools it works with. [awnix](https://github.com/Aitherium/awnix) is the Linux underneath it; **awflow** is one of its 72 bricks — each installs on its own, runs offline, and needs no account. 6 more are in development and 23 are planned.
 >
 > **Start here:** Chain parallel and sequential agent calls with deterministic ordering, a persistent journal, and hard budget enforcement. Replay from the journal at any breakpoint.
 
@@ -19,8 +19,15 @@ awflow is a **workflow interpreter** that runs deterministic, journaled multi-ag
 - **Deterministic replay**: Call hashing + journaling means re-running the same script returns cached agent answers, not new LLM calls
 - **Resume from interruption**: Stop a workflow mid-execution and resume later from the exact point where it diverges
 - **Concurrency primitives**: `agent()` (serial LLM call), `parallel()` (concurrent, barrier sync), `pipeline()` (concurrent, no barrier)
-- **Budget enforcement**: Hard token ceiling with no backpression — exceeding it raises immediately
+- **Budget enforcement**: Hard token ceiling with no backpressure — exceeding it raises immediately
 - **Live journaling**: JSONL-format audit trail of every call, response, and decision
+
+## Install
+
+```bash
+pip install aitherium-awflow            # import name and CLI: awflow
+pip install "aitherium-awflow[schema]"  # optional jsonschema validation
+```
 
 ## Why?
 
@@ -33,7 +40,8 @@ The fleet models' 131k context window is big enough for the orchestrator-as-LLM 
 Verify the package imports and can execute a trivial script offline:
 
 ```bash
-python -m AitherOS.lib.orchestration.awflow --self-test
+awflow --self-test
+# or: python -m awflow --self-test
 ```
 
 This runs a stub workflow that:
@@ -87,12 +95,11 @@ A step is `public_safe` only when its inputs and outputs are already public.
 The default is **false**, so private work can never reach the free public lane
 by omission.
 
-The `cloud` lane is DeepSeek Flash **through the awrouter at `127.0.0.1:8286`**
-(`AWFLOW_CLOUD_URL` overrides it) — the same cloud path Claude sessions use.
-It is deliberately *not* MicroScheduler: that scheduler steers a cloud DeepSeek
-model back to the local pool (the paid `api.deepseek.com` account is dark by
-owner order, 2026-11-12), so a "cloud" lane pointed there would silently be
-local. Local first, router cloud as the real overflow.
+The `cloud` lane routes **through `awrouter` at `127.0.0.1:8286`**
+(`AWFLOW_CLOUD_URL` overrides it). It is deliberately *not* MicroScheduler:
+that scheduler may steer cloud model aliases back to the local pool, so a
+"cloud" lane pointed there would silently run locally. Local first, router
+cloud as the real overflow.
 
 ### Runner credentials — no new CI secrets
 
@@ -145,10 +152,8 @@ What the plan and result guarantee:
   `resume_from`, expedition mirror) and is also written as an Agent Notebook
   when `lib.orchestration.NotebookStore` is available.
 
-The `workflow_plan` / `workflow_run` / `workflow_status` MCP tools
-(`apps/awnode/tools/mcp/mcp_ultracode.py`) expose the same capability to any
-agent; the patterns and pitfalls are documented in
-`config/skills/ultracode-workflows.skill.md`.
+When hosted inside AitherOS / `awnode`, the `workflow_plan` / `workflow_run` /
+`workflow_status` MCP tools expose the same capability to any agent.
 
 ## Determinism guarantee
 
@@ -166,7 +171,7 @@ Same complexity, now with determinism and resume.
 
 ## Example
 
-See `examples/hello_fleet.py` for a three-agent workflow:
+See `awflow/examples/hello_fleet.py` (and `examples/ultracode_audit.py`) for a three-agent workflow:
 
 1. Phase: "Planning"
 2. Parallel: two agents brainstorm
@@ -176,8 +181,12 @@ See `examples/hello_fleet.py` for a three-agent workflow:
 Run it locally (if a test MicroScheduler is available):
 
 ```bash
-python AitherOS/lib/orchestration/awflow/examples/hello_fleet.py
+python -m awflow.examples.hello_fleet
 ```
+
+## License
+
+Apache-2.0.
 
 <!-- aither-ecosystem:start GENERATED from the ecosystem registry. Edits here are overwritten; change the registry instead. -->
 
@@ -249,7 +258,7 @@ Each installs on its own, works offline, and needs no account.
 | [awsettings](https://github.com/Aitherium/awsettings) | that you will remember to re-approve the same thing on every box you work from | one profile, unioned rather than overwritten, with the credentials left behind |
 | [awavatar](https://github.com/Aitherium/awavatar) | a cloud 3D vendor's opaque task id | a manifest with a sha256, a licence and a rig-audit verdict per file |
 
-[**awnix**](https://github.com/Aitherium/awnix) is the ground floor — A Linux you can hand to an agent — immutable base, capabilities included.
+[**awnix**](https://github.com/Aitherium/awnix) is the ground floor — A Linux you can hand to an agent — immutable x86_64 & ARM64 (aarch64) base, capabilities included.
 
 ## The Aitherium ecosystem
 
@@ -283,7 +292,7 @@ Every repository here is public. Each publishes an `aither-manifest.json` beside
 | [awnest](https://github.com/Aitherium/awnest) | Prove there is a human before you let them into the nest | [docs](https://aitherium.github.io/awnest/) |
 | [awrena](https://github.com/Aitherium/awrena) | Put two agents head to head and get a verdict you can check | [docs](https://aitherium.github.io/awrena/) |
 | [awnboard](https://github.com/Aitherium/awnboard) | A front gate you can put in front of anything, and hand someone the key to | [docs](https://aitherium.github.io/awnboard/) |
-| [awnix](https://github.com/Aitherium/awnix) | A Linux you can hand to an agent — immutable base, capabilities included | [docs](https://aitherium.github.io/awnix/) |
+| [awnix](https://github.com/Aitherium/awnix) | A Linux you can hand to an agent — immutable x86_64 & ARM64 (aarch64) base, capabilities included | [docs](https://aitherium.github.io/awnix/) |
 | [awrecover](https://github.com/Aitherium/awrecover) | Labelled snapshots with an all-or-nothing restore | [docs](https://aitherium.github.io/awrecover/) |
 | [awstorage](https://github.com/Aitherium/awstorage) | Every drive on every node, indexed, classified and diffed -- so you can see what you own before you delete it | [docs](https://aitherium.github.io/awstorage/) |
 | [awrelay](https://github.com/Aitherium/awrelay) | Portable agent messaging — findings, alerts, coordination | [docs](https://aitherium.github.io/awrelay/) |
